@@ -1,18 +1,16 @@
-name: Build ImmortalWrt Packages
+name: Build Packages (25.12 - x86_64)
 
 on:
   workflow_dispatch:  # 手动触发
   push:
     tags: 
       - 'v*'         # 标签推送时触发
-  schedule:
-    - cron: '0 2 * * 1'  # 每周一凌晨2点自动构建
   pull_request:       # PR 时触发
 
 env:
-  SDK_URL: "https://downloads.immortalwrt.org/releases/24.10.4/targets/mediatek/filogic/immortalwrt-sdk-24.10.4-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64.tar.zst"
+  # x86_64 架构的 25.12 (Snapshot) SDK 链接
+  SDK_URL: "https://downloads.immortalwrt.org/snapshots/targets/x86/64/immortalwrt-sdk-x86-64_gcc-14.2.0_musl.Linux-x86_64.tar.zst"
   CONFIG_URL: "https://raw.githubusercontent.com/QC3284/nas-packages-luci-actions/main/test.config.txt"
-  SDK_DIR: "immortalwrt-sdk-24.10.4-mediatek-filogic_gcc-13.3.0_musl.Linux-x86_64"
 
 jobs:
   build:
@@ -34,20 +32,20 @@ jobs:
       run: |
         axel -n 8 -o sdk.tar.zst ${{ env.SDK_URL }}
 
-    - name: Extract SDK
+    - name: Extract SDK and Set Env
       run: |
         tar -I zstd -xvf sdk.tar.zst
+        SDK_DIR_NAME=$(ls -d immortalwrt-sdk-* | head -n 1)
+        echo "SDK_DIR=$SDK_DIR_NAME" >> $GITHUB_ENV
 
     - name: Setup environment and feeds
       run: |
         cd ${{ env.SDK_DIR }}
         
-        # 添加所有软件源
         echo 'src-git nas https://github.com/linkease/nas-packages.git;master' >> feeds.conf.default
         echo 'src-git nas_luci https://github.com/linkease/nas-packages-luci.git;main' >> feeds.conf.default
         echo 'src-git istore https://github.com/linkease/istore;main' >> feeds.conf.default
         
-        # 更新并安装所有feeds
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
@@ -59,11 +57,8 @@ jobs:
     - name: Compile All Packages
       run: |
         cd ${{ env.SDK_DIR }}
-        # 编译所有选中的包
         make defconfig
-        # 编译 quickstart 包
         make package/feeds/nas_luci/luci-app-quickstart/compile -j$(nproc)
-        # 编译 iStore 相关包
         make package/feeds/istore/luci-app-store/compile -j$(nproc)
         make package/feeds/istore/luci-lib-taskd/compile -j$(nproc)
         make package/feeds/istore/luci-lib-xterm/compile -j$(nproc)
@@ -72,90 +67,61 @@ jobs:
       id: date
       run: echo "date=$(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
 
-    - name: Find and list IPK files
-      id: find-ipk
+    - name: Find, list and collect APK files
+      id: process-apk
       run: |
         cd ${{ env.SDK_DIR }}
+        mkdir -p ../output_apks
         
-        # 查找所有相关IPK文件
-        IPK_FILES=$(find bin/packages/aarch64_cortex-a53/ \( -name "*quickstart*" -o -name "*store*" -o -name "*taskd*" -o -name "*xterm*" \) -type f 2>/dev/null | tr '\n' ' ' || echo "")
+        APK_FILES=$(find bin/packages/ -name "*.apk" \( -name "*quickstart*" -o -name "*store*" -o -name "*taskd*" -o -name "*xterm*" \) -type f)
         
-        echo "Found IPK files:"
-        for file in $IPK_FILES; do
+        echo "Found APK files:"
+        FILE_COUNT=0
+        for file in $APK_FILES; do
           if [ -f "$file" ]; then
             echo "  - $(basename "$file")"
             ls -la "$file"
+            cp "$file" ../output_apks/
+            FILE_COUNT=$((FILE_COUNT+1))
           fi
         done
         
-        # 统计文件数量
-        FILE_COUNT=$(echo "$IPK_FILES" | wc -w)
         echo "Total files found: $FILE_COUNT"
         echo "file_count=$FILE_COUNT" >> $GITHUB_OUTPUT
-        echo "ipk_files=$IPK_FILES" >> $GITHUB_OUTPUT
 
-    - name: Upload IPK files as artifact
+    - name: Upload APK files as artifact
       if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: compiled-ipk-packages-${{ github.run_id }}
-        path: |
-          ${{ env.SDK_DIR }}/bin/packages/aarch64_cortex-a53/**/*quickstart*
-          ${{ env.SDK_DIR }}/bin/packages/aarch64_cortex-a53/**/*store*
-          ${{ env.SDK_DIR }}/bin/packages/aarch64_cortex-a53/**/*taskd*
-          ${{ env.SDK_DIR }}/bin/packages/aarch64_cortex-a53/**/*xterm*
+        name: compiled-apk-packages-x86_64-${{ github.run_id }}
+        path: output_apks/*.apk
         retention-days: 30
 
     - name: Create Automatic Release
-      if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'))
+      if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'))
       uses: softprops/action-gh-release@v2
       with:
         tag_name: auto-build-${{ github.run_id }}-${{ github.run_attempt }}
         name: "Auto Build #${{ github.run_number }} (${{ github.ref_name }})"
         body: |
-          ## ImmortalWrt Packages Auto Build
+          ## ImmortalWrt 25.12 Packages (x86_64)
           
           **Build Information:**
-          - Run ID: ${{ github.run_id }}
-          - Run Number: ${{ github.run_number }}
+          - Architecture: **x86_64**
           - Trigger: ${{ github.event_name }}
-          - Commit: ${{ github.sha }}
           - Date: ${{ steps.date.outputs.date }}
-          - Files Count: ${{ steps.find-ipk.outputs.file_count }}
+          - Files Count: ${{ steps.process-apk.outputs.file_count }}
+          - Package Format: **APK**
           
-          **Built Packages:**
-          - QuickStart packages
-          - iStore packages (luci-app-store, luci-lib-taskd, luci-lib-xterm)
-          
-          **Download:** All IPK files are attached below.
-          
-          This is an automated build of packages for ImmortalWrt.
+          **Download:** All APK files are attached below.
         draft: false
         prerelease: false
-        files: |
-          ${{ env.SDK_DIR }}/bin/packages/aarch64_cortex-a53/**/*quickstart*
-          ${{ env.SDK_DIR }}/bin/packages/aarch64_cortex-a53/**/*store*
-          ${{ env.SDK_DIR }}/bin/packages/aarch64_cortex-a53/**/*taskd*
-          ${{ env.SDK_DIR }}/bin/packages/aarch64_cortex-a53/**/*xterm*
+        files: output_apks/*.apk
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Output build summary
       run: |
-        echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+        echo "## Build Summary (x86_64)" >> $GITHUB_STEP_SUMMARY
         echo "✅ Package compilation completed successfully!" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Build Date:** ${{ steps.date.outputs.date }}" >> $GITHUB_STEP_SUMMARY
-        echo "**Total Files:** ${{ steps.find-ipk.outputs.file_count }}" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Built Packages:**" >> $GITHUB_STEP_SUMMARY
-        echo "- QuickStart (luci-app-quickstart)" >> $GITHUB_STEP_SUMMARY
-        echo "- iStore (luci-app-store)" >> $GITHUB_STEP_SUMMARY
-        echo "- iStore Dependencies (luci-lib-taskd, luci-lib-xterm)" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "📦 Artifacts have been uploaded and will be available for 30 days." >> $GITHUB_STEP_SUMMARY
-        if [ "${{ github.event_name }}" = "push" ] && [ "${{ startsWith(github.ref, 'refs/tags/') }}" = "true" ]; then
-          echo "🚀 Official release has been published with tag ${{ github.ref_name }}." >> $GITHUB_STEP_SUMMARY
-        elif [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event_name }}" = "schedule" ]; then
-          echo "🚀 Automatic pre-release has been published with unique tag." >> $GITHUB_STEP_SUMMARY
-        fi
+        echo "**Total Files:** ${{ steps.process-apk.outputs.file_count }} (APK format)" >> $GITHUB_STEP_SUMMARY
