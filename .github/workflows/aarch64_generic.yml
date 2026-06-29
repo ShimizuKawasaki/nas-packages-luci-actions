@@ -7,6 +7,10 @@ on:
       - 'v*'         # 标签推送时触发
   pull_request:       # PR 时触发
 
+# 🌟 显式声明全局写入权限，完美解决 403 报错
+permissions:
+  contents: write
+
 env:
   # 通用 ARM64 (aarch64) 架构的 25.12 (Snapshot) SDK 链接
   SDK_URL: "https://downloads.immortalwrt.org/releases/25.12.0/targets/armsr/armv8/immortalwrt-sdk-25.12.0-armsr-armv8_gcc-14.3.0_musl.Linux-x86_64.tar.zst"
