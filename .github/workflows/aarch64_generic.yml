@@ -9,7 +9,7 @@ on:
 
 env:
   # 通用 ARM64 (aarch64) 架构的 25.12 (Snapshot) SDK 链接
-  SDK_URL: "https://downloads.immortalwrt.org/snapshots/targets/armsr/armv8/immortalwrt-sdk-armsr-armv8_gcc-14.2.0_musl.Linux-x86_64.tar.zst"
+  SDK_URL: "https://downloads.immortalwrt.org/releases/25.12.0/targets/armsr/armv8/immortalwrt-sdk-25.12.0-armsr-armv8_gcc-14.3.0_musl.Linux-x86_64.tar.zst"
   CONFIG_URL: "https://raw.githubusercontent.com/QC3284/nas-packages-luci-actions/main/test.config.txt"
 
 jobs:
